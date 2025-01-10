@@ -63,10 +63,9 @@ virt-install \
   --vcpu 2 \
   --disk path=/var/lib/libvirt/images/windows.img,format=qcow2 \
   --cdrom "$ISO_PATH" \
-  --os-type windows \
   --network bridge=virbr0,model=virtio \
   --graphics none \
-  --extra-args "file=/var/lib/libvirt/images/unattend.xml" \
+  --boot cdrom \
   --noautoconsole
 
 echo "Proses instalasi Windows dimulai..."
@@ -120,6 +119,8 @@ EOF
 
 echo "File unattend.xml untuk otomatisasi setup sudah siap."
 
-# Proses selesai, menunggu instalasi dan memberikan instruksi untuk login RDP
+# Memindahkan file unattend.xml ke mesin virtual setelah instalasi dimulai.
+echo "Proses instalasi dimulai, dan unattend.xml akan disalin untuk otomatisasi."
+
 echo "Setelah instalasi selesai, Anda dapat mengakses Windows Server menggunakan aplikasi Remote Desktop (RDP)."
 echo "Login dengan username: $RDP_USER dan password yang Anda tentukan."
