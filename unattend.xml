@@ -1,0 +1,17 @@
+<settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup">
+        <FirstLogonCommands>
+            <!-- Menambahkan command untuk mengatur password RDP -->
+            <SynchronousCommand wcm:action="add">
+                <CommandLine>powershell.exe -ExecutionPolicy Bypass -Command "New-LocalUser -Name 'Administrator' -Password (ConvertTo-SecureString 'YourRDPPassword123!' -AsPlainText -Force) -FullName 'Administrator' -Description 'Windows Administrator Account'"</CommandLine>
+                <Order>1</Order>
+            </SynchronousCommand>
+
+            <!-- Menjalankan skrip enable_rdp.ps1 -->
+            <SynchronousCommand wcm:action="add">
+                <CommandLine>powershell.exe -ExecutionPolicy Bypass -File C:\enable_rdp.ps1</CommandLine>
+                <Order>2</Order>
+            </SynchronousCommand>
+        </FirstLogonCommands>
+    </component>
+</settings>
