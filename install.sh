@@ -1,204 +1,145 @@
 #!/bin/bash
 
-# Windows Server 2016 Installation Script
-# Enhanced version with better security and features
-# For Ubuntu 20.04 VPS (2vCPU, 3GB RAM, 80GB disk)
+# Windows Server Auto Install Script
+echo "================================"
+echo "Windows Server Auto Install Tool"
+echo "================================"
 
-# Strict error handling
-set -euo pipefail
-IFS=$'\n\t'
-
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
-
-# Function definitions
-print_status() { echo -e "${GREEN}[*] $1${NC}"; }
-print_error() { echo -e "${RED}[!] $1${NC}"; exit 1; }
-print_warning() { echo -e "${YELLOW}[!] $1${NC}"; }
-print_info() { echo -e "${BLUE}[+] $1${NC}"; }
-
-# Banner
-echo "================================================================"
-echo "   Windows Server 2016 Installation Script - Enhanced Version"
-echo "   For Ubuntu 20.04 VPS"
-echo "================================================================"
-
-# Check root privileges
+# Check if running as root
 if [[ $EUID -ne 0 ]]; then
-    print_error "Script harus dijalankan sebagai root (sudo)"
+   echo "This script must be run as root" 
+   exit 1
 fi
 
-# System requirements check
-print_status "Memeriksa spesifikasi sistem..."
-
-# Memory check
-mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-mem_gb=$((mem_kb / 1024 / 1024))
-if [ $mem_gb -lt 3 ]; then
-    print_error "Minimal RAM 3GB diperlukan. Terdeteksi: ${mem_gb}GB"
+# Check system requirements
+MEMORY=$(free -m | awk '/^Mem:/{print $2}')
+CPUS=$(nproc)
+if [[ $MEMORY -lt 2048 || $CPUS -lt 2 ]]; then
+    echo "Error: Insufficient system resources"
+    echo "Required: Minimum 2GB RAM and 2 CPU cores"
+    echo "Current: $MEMORY MB RAM, $CPUS CPU cores"
+    exit 1
 fi
-print_info "RAM: ${mem_gb}GB [OK]"
 
-# Disk space check
-disk_gb=$(df -BG / | awk 'NR==2 {print $4}' | tr -d 'G')
-if [ $disk_gb -lt 80 ]; then
-    print_error "Minimal disk space 80GB diperlukan. Terdeteksi: ${disk_gb}GB"
-fi
-print_info "Disk Space: ${disk_gb}GB [OK]"
-
-# CPU check
-cpu_count=$(nproc)
-if [ $cpu_count -lt 2 ]; then
-    print_error "Minimal 2 CPU cores diperlukan. Terdeteksi: ${cpu_count}"
-fi
-print_info "CPU Cores: ${cpu_count} [OK]"
-
-# Install required packages
-print_status "Menginstall paket yang diperlukan..."
-apt-get update -qq || print_error "Gagal update package list"
-apt-get install -y wget gzip ntfs-3g curl fdisk gdisk parted -qq || print_error "Gagal install packages"
-
-# Configuration variables
+# Define Windows ISO URL
 ISO_URL="https://software-static.download.prss.microsoft.com/pr/download/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO"
-ISO_PATH="/tmp/windows.iso"
-MOUNT_PATH="/mnt/windows"
 
-# Get network information
-print_status "Mengambil informasi jaringan..."
-IP4=$(curl -4 -s icanhazip.com) || print_error "Gagal mendapatkan IP address"
-GW=$(ip route | awk '/default/ { print $3 }') || print_error "Gagal mendapatkan Gateway"
-print_info "IP Address: ${IP4}"
-print_info "Gateway: ${GW}"
+# Get system information
+IP4=$(curl -4 -s icanhazip.com)
+if [[ -z "$IP4" ]]; then
+    echo "Error: Could not detect public IP address"
+    exit 1
+fi
 
-# Password setup with requirements
-print_status "Setup password Administrator..."
+GW=$(ip route | awk '/default/ { print $3 }')
+if [[ -z "$GW" ]]; then
+    echo "Error: Could not detect default gateway"
+    exit 1
+fi
+
+# Password prompt with validation
 while true; do
-    read -sp "Masukkan password Administrator (min. 12 karakter, harus mengandung huruf besar, kecil, dan angka): " PASSADMIN
+    read -sp "Enter Administrator password (min 12 chars): " PASSADMIN
     echo
-    if [[ ${#PASSADMIN} -ge 12 && "$PASSADMIN" =~ [A-Z] && "$PASSADMIN" =~ [a-z] && "$PASSADMIN" =~ [0-9] ]]; then
+    if [[ ${#PASSADMIN} -lt 12 ]]; then
+        echo "Password must be at least 12 characters long"
+        continue
+    fi
+    read -sp "Confirm password: " PASSCONFIRM
+    echo
+    if [[ "$PASSADMIN" == "$PASSCONFIRM" ]]; then
         break
     else
-        print_error "Password tidak memenuhi persyaratan keamanan! Silakan coba lagi."
+        echo "Passwords do not match. Please try again."
     fi
 done
 
-# Create Windows configuration scripts
-print_status "Membuat script konfigurasi Windows..."
-
-# Network configuration script
+# Create Windows network configuration script
 cat >/tmp/net.bat<<EOF
 @ECHO OFF
-ECHO Setting up network configuration...
 cd.>%windir%\GetAdmin
 if exist %windir%\GetAdmin (del /f /q "%windir%\GetAdmin") else (
-    echo CreateObject^("Shell.Application"^).ShellExecute "%~s0", "%*", "", "runas", 1 >> "%temp%\Admin.vbs"
-    "%temp%\Admin.vbs"
-    del /f /q "%temp%\Admin.vbs"
-    exit /b 2
-)
-
+echo CreateObject^("Shell.Application"^).ShellExecute "%~s0", "%*", "", "runas", 1 >> "%temp%\Admin.vbs"
+"%temp%\Admin.vbs"
+del /f /q "%temp%\Admin.vbs"
+exit /b 2)
 net user Administrator ${PASSADMIN}
-wmic useraccount where "name='Administrator'" set PasswordExpires=false
-
-netsh interface ip set address name="Ethernet Instance 0" source=static address=${IP4} mask=255.255.240.0 gateway=${GW}
-netsh interface ip add dns name="Ethernet Instance 0" addr=8.8.8.8 index=1
-netsh interface ip add dns name="Ethernet Instance 0" addr=8.8.4.4 index=2
-
-REM Enable Remote Desktop
-reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
-
+netsh -c interface ip set address name="Ethernet Instance 0" source=static address=${IP4} mask=255.255.240.0 gateway=${GW}
+netsh -c interface ip add dnsservers name="Ethernet Instance 0" address=8.8.8.8 index=1 validate=no
+netsh -c interface ip add dnsservers name="Ethernet Instance 0" address=8.8.4.4 index=2 validate=no
 cd /d "%ProgramData%/Microsoft/Windows/Start Menu/Programs/Startup"
 del /f /q net.bat
 exit
 EOF
 
-# System optimization script
-cat >/tmp/optimize.bat<<EOF
+# Create disk partition and RDP configuration script
+cat >/tmp/dpart.bat<<EOF
 @ECHO OFF
-ECHO Optimizing system configuration...
+echo Windows Server Setup Configuration
+echo ================================
+echo DO NOT CLOSE THIS WINDOW
+echo RDP will be configured on port 5000 (${IP4}:5000)
 cd.>%windir%\GetAdmin
 if exist %windir%\GetAdmin (del /f /q "%windir%\GetAdmin") else (
-    echo CreateObject^("Shell.Application"^).ShellExecute "%~s0", "%*", "", "runas", 1 >> "%temp%\Admin.vbs"
-    "%temp%\Admin.vbs"
-    del /f /q "%temp%\Admin.vbs"
-    exit /b 2
-)
+echo CreateObject^("Shell.Application"^).ShellExecute "%~s0", "%*", "", "runas", 1 >> "%temp%\Admin.vbs"
+"%temp%\Admin.vbs"
+del /f /q "%temp%\Admin.vbs"
+exit /b 2)
 
-REM Disable unnecessary services
-sc config "WSearch" start= disabled
-sc config "wuauserv" start= disabled
-sc config "BITS" start= disabled
+rem Configure RDP Port
+reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v PortNumber /t REG_DWORD /d 5000 /f
 
-REM Configure Windows Firewall
-netsh advfirewall firewall add rule name="RDP" dir=in action=allow protocol=TCP localport=3389
-netsh advfirewall firewall add rule name="ICMP" dir=in action=allow protocol=icmpv4
+rem Add Firewall Rule
+netsh advfirewall firewall add rule name="RDP on 5000" dir=in action=allow protocol=TCP localport=5000
 
-REM Optimize performance settings
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v "IoPageLockLimit" /t REG_DWORD /d 983040 /f
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" /v "MaxUserPort" /t REG_DWORD /d 65534 /f
-
-REM Extend disk partition
+rem Extend Disk
 ECHO SELECT VOLUME=%%SystemDrive%% > "%SystemDrive%\diskpart.extend"
 ECHO EXTEND >> "%SystemDrive%\diskpart.extend"
 START /WAIT DISKPART /S "%SystemDrive%\diskpart.extend"
 del /f /q "%SystemDrive%\diskpart.extend"
 
 cd /d "%ProgramData%/Microsoft/Windows/Start Menu/Programs/Startup"
-del /f /q optimize.bat
+del /f /q dpart.bat
 exit
 EOF
 
-# Download Windows ISO
-print_status "Downloading Windows Server 2016 ISO..."
-wget --no-check-certificate -O "${ISO_PATH}" "${ISO_URL}" || print_error "Gagal download Windows ISO"
+# Install required tools
+echo "Installing required packages..."
+apt-get update >/dev/null 2>&1
+apt-get install -y wget ntfs-3g gzip curl >/dev/null 2>&1
 
-# Prepare disk
-print_status "Mempersiapkan disk..."
-# Clear partition table
-dd if=/dev/zero of=/dev/vda bs=512 count=1 conv=notrunc
+# Download and extract Windows ISO
+echo "Downloading Windows Server 2016 ISO..."
+wget --no-check-certificate -O windows.iso "$ISO_URL" || {
+    echo "Error downloading Windows ISO"
+    exit 1
+}
 
-# Create new partition table and partitions
-parted -s /dev/vda mklabel gpt
-parted -s /dev/vda mkpart primary ntfs 1MiB 100%
-parted -s /dev/vda set 1 boot on
+echo "Writing ISO to disk..."
+dd if=windows.iso of=/dev/vda bs=4M status=progress || {
+    echo "Error writing ISO to disk"
+    exit 1
+}
 
-# Install Windows
-print_status "Menginstall Windows..."
-dd if="${ISO_PATH}" of=/dev/vda bs=4M status=progress || print_error "Gagal write Windows ke disk"
+# Mount and configure Windows
+echo "Configuring Windows installation..."
+mkdir -p /mnt
+mount.ntfs-3g /dev/vda2 /mnt || {
+    echo "Error mounting Windows partition"
+    exit 1
+}
 
-# Mount and configure
-print_status "Mengkonfigurasi Windows..."
-mkdir -p "${MOUNT_PATH}"
-sleep 5  # Wait for device to settle
-mount.ntfs-3g /dev/vda1 "${MOUNT_PATH}" || print_error "Gagal mount Windows partition"
-
-# Copy configuration files
-STARTUP_PATH="${MOUNT_PATH}/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup"
-mkdir -p "${STARTUP_PATH}"
-cp /tmp/net.bat "${STARTUP_PATH}/net.bat"
-cp /tmp/optimize.bat "${STARTUP_PATH}/optimize.bat"
+# Copy configuration scripts
+cp /tmp/net.bat "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup/"
+cp /tmp/dpart.bat "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup/"
 
 # Cleanup
-print_status "Membersihkan temporary files..."
-umount "${MOUNT_PATH}"
-rm -f "${ISO_PATH}" /tmp/net.bat /tmp/optimize.bat
-rmdir "${MOUNT_PATH}"
+rm -f /tmp/net.bat /tmp/dpart.bat
+rm -f windows.iso
 
-# Installation complete
-echo "================================================================"
-print_status "Instalasi selesai! Informasi koneksi:"
-print_info "IP Address: ${IP4}"
-print_info "Port: 3389"
-print_info "Username: Administrator"
-print_info "Password: [sesuai yang anda setting]"
-echo "================================================================"
-print_warning "Sistem akan restart dalam 10 detik..."
-print_warning "Tunggu 3-5 menit setelah restart untuk proses konfigurasi Windows selesai."
-echo "================================================================"
-
-sleep 10
-reboot
+echo "================================================"
+echo "Installation completed! Please reboot your system."
+echo "RDP will be available at: ${IP4}:5000"
+echo "Username: Administrator"
+echo "Password: [your entered password]"
+echo "================================================"
