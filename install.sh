@@ -1,121 +1,153 @@
 #!/bin/bash
 
-# Logging dan warna
+# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
-# Logging function
-log() {
-    local type=$1
-    local message=$2
-    local color=$NC
-
-    case $type in
-        "error")
-            color=$RED
-            ;;
-        "success")
-            color=$GREEN
-            ;;
-        "warning")
-            color=$YELLOW
-            ;;
-    esac
-
-    echo -e "${color}[$(date +'%Y-%m-%d %H:%M:%S')] $message${NC}"
-}
-
-# Fungsi cek root
-check_root() {
-    if [[ $EUID -ne 0 ]]; then 
-        log "error" "Script harus dijalankan sebagai root"
+# Function to check system requirements
+check_requirements() {
+    echo "Checking system requirements..."
+    
+    # Check if running as root
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}This script must be run as root${NC}"
         exit 1
-    fi
-}
+    }
 
-# Fungsi cek versi Ubuntu
-check_ubuntu_version() {
-    if ! command -v lsb_release &> /dev/null; then
-        apt-get update && apt-get install -y lsb-release
-    fi
-    
-    local VERSION=$(lsb_release -rs)
-    if [[ "$VERSION" != "20.04" ]]; then
-        log "warning" "Script dioptimalkan untuk Ubuntu 20.04"
-        log "warning" "Versi saat ini: Ubuntu $VERSION"
-        read -p "Lanjutkan? (y/n): " confirm
-        [[ $confirm != [yY] ]] && exit 1
-    fi
-    
-    log "success" "Versi Ubuntu $VERSION terdeteksi - Kompatibel"
-}
-
-# Fungsi cek persyaratan sistem
-check_system_requirements() {
-    local total_ram=$(free -m | awk '/^Mem:/{print $2}')
-    local cpu_cores=$(nproc)
-    local free_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
-
-    if [[ $total_ram -lt 2800 ]]; then
-        log "error" "RAM tidak mencukupi. Minimal 2.8GB diperlukan. Saat ini: ${total_ram}MB"
+    # Check available disk space (need at least 40GB)
+    available_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+    if [ $available_space -lt 40 ]; then
+        echo -e "${RED}Not enough disk space. Need at least 40GB free.${NC}"
         exit 1
-    fi
-    
-    if [[ $cpu_cores -lt 2 ]]; then
-        log "error" "Core CPU tidak mencukupi. Minimal 2 core diperlukan. Saat ini: $cpu_cores"
+    }
+
+    # Check RAM
+    total_ram=$(free -m | awk '/^Mem:/{print $2}')
+    if [ $total_ram -lt 2048 ]; then
+        echo -e "${RED}Not enough RAM. Need at least 2GB RAM.${NC}"
         exit 1
-    fi
-    
-    if [[ $free_space -lt 25 ]]; then
-        log "error" "Ruang disk tidak mencukupi. Minimal 25GB diperlukan. Saat ini: ${free_space}GB"
+    }
+
+    # Check if running on Digital Ocean
+    if ! curl -s http://169.254.169.254/metadata/v1/id > /dev/null; then
+        echo -e "${RED}This script is designed for Digital Ocean droplets${NC}"
         exit 1
-    fi
-    
-    log "success" "Pemeriksaan persyaratan sistem berhasil"
+    }
 }
 
-# Fungsi optimasi sistem
-optimize_system() {
-    log "warning" "Mengoptimalkan sistem..."
-    
-    apt-get clean
-    sync
-    echo 3 > /proc/sys/vm/drop_caches
-    
-    systemctl stop apache2 2>/dev/null
-    systemctl stop mysql 2>/dev/null
-    systemctl stop postgresql 2>/dev/null
-    
-    echo 10 > /proc/sys/vm/swappiness
-    
-    log "success" "Sistem berhasil dioptimalkan"
-}
-
-# Fungsi instalasi paket
-install_required_packages() {
-    log "warning" "Menginstal paket yang diperlukan..."
-    
+# Function to install required packages
+install_requirements() {
+    echo "Installing required packages..."
     apt-get update
-    apt-get install -y wget gzip curl mount ntfs-3g
-    
-    if [[ $? -ne 0 ]]; then
-        log "error" "Gagal menginstal paket"
-        exit 1
+    apt-get install -y wget gzip curl
+}
+
+echo "==================================="
+echo "Windows Server Installation Script"
+echo "For Digital Ocean VPS"
+echo "==================================="
+
+# Check requirements
+check_requirements
+install_requirements
+
+# Windows Server 2019 Standard Evaluation ISO URL
+WIN_ISO="https://go.microsoft.com/fwlink/p/?LinkID=2195167"
+
+# Get password for Administrator account
+while true; do
+    read -sp "Enter Administrator password (min 12 characters): " PASSADMIN
+    echo
+    if [ ${#PASSADMIN} -ge 12 ]; then
+        break
+    else
+        echo -e "${RED}Password must be at least 12 characters long${NC}"
     fi
-    
-    log "success" "Paket berhasil diinstal"
+done
+
+# Get IP and Gateway
+IP4=$(curl -4 -s icanhazip.com)
+GW=$(ip route | awk '/default/ { print $3 }')
+
+# Create network configuration script
+cat >/tmp/net.bat<<EOF
+@ECHO OFF
+cd.>%windir%\GetAdmin
+if exist %windir%\GetAdmin (del /f /q "%windir%\GetAdmin") else (
+echo CreateObject^("Shell.Application"^).ShellExecute "%~s0", "%*", "", "runas", 1 >> "%temp%\Admin.vbs"
+"%temp%\Admin.vbs"
+del /f /q "%temp%\Admin.vbs"
+exit /b 2)
+net user Administrator ${PASSADMIN}
+for /f "tokens=3*" %%i in ('netsh interface show interface ^|findstr /I /R "Local.* Ethernet Ins*"') do (set InterfaceName=%%j)
+netsh -c interface ip set address name="Ethernet Instance 0" source=static address=${IP4} mask=255.255.240.0 gateway=${GW}
+netsh -c interface ip add dnsservers name="Ethernet Instance 0" address=8.8.8.8 index=1 validate=no
+netsh -c interface ip add dnsservers name="Ethernet Instance 0" address=8.8.4.4 index=2 validate=no
+cd /d "%ProgramData%/Microsoft/Windows/Start Menu/Programs/Startup"
+del /f /q net.bat
+exit
+EOF
+
+# Create disk partition script
+cat >/tmp/dpart.bat<<EOF
+@ECHO OFF
+echo Windows Server Setup
+echo DO NOT CLOSE THIS WINDOW
+echo RDP will be configured on port 5000. Connect using ${IP4}:5000
+cd.>%windir%\GetAdmin
+if exist %windir%\GetAdmin (del /f /q "%windir%\GetAdmin") else (
+echo CreateObject^("Shell.Application"^).ShellExecute "%~s0", "%*", "", "runas", 1 >> "%temp%\Admin.vbs"
+"%temp%\Admin.vbs"
+del /f /q "%temp%\Admin.vbs"
+exit /b 2)
+set PORT=5000
+set RULE_NAME="Open Port %PORT%"
+netsh advfirewall firewall show rule name=%RULE_NAME% >nul
+if not ERRORLEVEL 1 (
+    rem Rule %RULE_NAME% already exists.
+    echo Rule already exists
+) else (
+    netsh advfirewall firewall add rule name=%RULE_NAME% dir=in action=allow protocol=TCP localport=%PORT%
+)
+reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v PortNumber /t REG_DWORD /d 5000
+ECHO SELECT VOLUME=%%SystemDrive%% > "%SystemDrive%\diskpart.extend"
+ECHO EXTEND >> "%SystemDrive%\diskpart.extend"
+START /WAIT DISKPART /S "%SystemDrive%\diskpart.extend"
+del /f /q "%SystemDrive%\diskpart.extend"
+cd /d "%ProgramData%/Microsoft/Windows/Start Menu/Programs/Startup"
+del /f /q dpart.bat
+exit
+EOF
+
+echo "Downloading and installing Windows..."
+wget --no-check-certificate -O windows.iso "$WIN_ISO"
+
+# Convert and write ISO to disk
+dd if=windows.iso of=/dev/vda bs=4M status=progress
+rm windows.iso
+
+# Mount Windows partition
+echo "Configuring Windows installation..."
+mount.ntfs-3g /dev/vda2 /mnt || {
+    echo -e "${RED}Failed to mount Windows partition${NC}"
+    exit 1
 }
 
-# Fungsi utama
-main() {
-    check_root
-    check_ubuntu_version
-    check_system_requirements
-    optimize_system
-    install_required_packages
-}
+# Copy configuration scripts
+cp -f /tmp/net.bat "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup/"
+cp -f /tmp/dpart.bat "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup/"
 
-# Jalankan fungsi utama
-main
+echo -e "${GREEN}Installation completed!${NC}"
+echo "System will now reboot. Please wait 5-10 minutes before connecting via RDP."
+echo "RDP Connection details:"
+echo "IP: ${IP4}"
+echo "Port: 5000"
+echo "Username: Administrator"
+echo "Password: [your configured password]"
+
+# Cleanup and reboot
+rm -f /tmp/net.bat /tmp/dpart.bat
+echo "Rebooting in 10 seconds..."
+sleep 10
+reboot
