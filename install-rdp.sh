@@ -26,9 +26,25 @@ apt-get install -y xorgxrdp
 # Install sesinya dengan XFCE
 echo "startxfce4" >~/.xsession
 
-# Atur agar xrdp bisa berjalan
+# Perbaiki pengaturan port xrdp menjadi 3389
+sed -i 's/port=1/port=3389/' /etc/xrdp/xrdp.ini
+
+# Pastikan xrdp bisa berjalan
 systemctl enable xrdp
 systemctl start xrdp
+
+# Mengatasi potensi masalah port yang sudah digunakan (3389)
+# Cek apakah port 3389 sudah digunakan
+if sudo ss -tuln | grep ':3389'; then
+    echo "Port 3389 sudah digunakan, mencari proses yang menggunakan port tersebut..."
+    pid=$(sudo lsof -t -i:3389)
+    if [ ! -z "$pid" ]; then
+        echo "Menghentikan proses dengan PID: $pid"
+        sudo kill -9 $pid
+    fi
+else
+    echo "Port 3389 tidak digunakan, melanjutkan..."
+fi
 
 # Membuat user bella dan mengatur password
 # Memastikan grup admin sudah ada
@@ -37,9 +53,6 @@ useradd -m -g admin bella
 echo "bella:bella123" | chpasswd
 
 # Setel ulang konfigurasi xrdp untuk port 3389 (default RDP)
-sed -i 's/port=3389/port=ask-1/' /etc/xrdp/xrdp.ini
-
-# Restart xrdp untuk aplikasi perubahan
 systemctl restart xrdp
 
 # Konfigurasi firewall agar port 3389 terbuka
