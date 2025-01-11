@@ -1,126 +1,101 @@
 #!/bin/bash
+echo "SCRIPT AUTO INSTALL WINDOWS by Nagara"
+echo
+echo "Pilih OS yang ingin anda install"
+echo "[1] Windows 2019(Default)"
+echo "[2] Windows 2016"
+echo "[3] Windows 2012"
+echo "[4) Windows 10"
+echo "[5] Chat Nagara Untuk Add OS lain"
 
-# Menanyakan kepada user apakah ingin menginstall Windows
-echo "Apakah Anda ingin menginstall Windows 2022? (y/n)"
-read INSTALL_WINDOWS
+read -p "Pilih [1]: " PILIH OS
 
-if [ "$INSTALL_WINDOWS" != "y" ]; then
-    echo "Proses dibatalkan."
-    exit 1
-fi
+case "$PILIHOS" in
+	1|"") PILIHOS="https://download1322.mediafire.com/q45q3lnfq46gmouZIGTp712CYsj2ZuIMho3b7Z-7A2TIBmrDCLiePiRXdKLeYvaXkwaIRHaN3UaEiDMbE3npFuMTAxRoP6Iu0tCKma3xJmWL_v1wcLngELHu78oqJ-OJGwSl87JkZzjUKxOLnxYR6mBUMo6-0jfbb2xg8zKnlj8SJA/s92phcj6bgp0yhg/Windows2022.gz";;
+	2) PILIHOS="https://file.nixpoin.com/windows2016.gz";;
+	3) PILIHOS="https://file.nixpoin.com/windows2012v2.gz";;
+	4) PILIHOS="https://file.nixpoin.com/win10.gz";;
+	5) read -p "[?] Masukkan Link GZ mu : " PILIHOS;;
+	*) echo "[!] Pilihan salah"; exit;;
+esac
 
-# Meminta username RDP
-echo "Masukkan username RDP yang ingin anda buat:"
-read RDP_USER
+echo "[*] Password yang saya buat sudah masuk wordlist bruteforce, silahkan masukkan password yang lebih aman!"
+read -p "[?] Masukkan password untuk akun Administrator Rdp anda(minimal 12 karakter) : " PASSADMIN
 
-# Meminta password RDP
-echo "Masukkan password RDP untuk akses (minimal 8 karakter):"
-read -s RDP_PASS
+IP4=$(curl -4 -s icanhazip.com)
+GW=$(ip route | awk '/default/ { print $3 }')
 
-# Update dan Install KVM/QEMU
-echo "Memperbarui sistem dan menginstal KVM/QEMU..."
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst wget
 
-# Periksa apakah sistem mendukung Virtualisasi KVM
-if [[ $(egrep -c '(vmx|svm)' /proc/cpuinfo) -eq 0 ]]; then
-    echo "CPU Anda tidak mendukung KVM. Skrip dihentikan."
-    exit 1
-fi
+cat >/tmp/net.bat<<EOF
+@ECHO OFF
+cd.>%windir%\GetAdmin
+if exist %windir%\GetAdmin (del /f /q "%windir%\GetAdmin") else (
+echo CreateObject^("Shell.Application"^).ShellExecute "%~s0", "%*", "", "runas", 1 >> "%temp%\Admin.vbs"
+"%temp%\Admin.vbs"
+del /f /q "%temp%\Admin.vbs"
+exit /b 2)
+net user Administrator $PASSADMIN
 
-# Memastikan Sistem Memiliki Swap Memory (Tambahkan jika belum ada)
-if [[ ! -f /swapfile ]]; then
-    echo "Swap file tidak ditemukan. Menambahkan swap..."
-    sudo fallocate -l 4G /swapfile
-    sudo chmod 600 /swapfile
-    sudo mkswap /swapfile
-    sudo swapon /swapfile
 
-    # Tambahkan ke fstab agar swap tetap aktif setelah reboot
-    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-fi
+for /f "tokens=3*" %%i in ('netsh interface show interface ^|findstr /I /R "Local.* Ethernet Ins*"') do (set InterfaceName=%%j)
+netsh -c interface ip set address name="Ethernet Instance 0" source=static address=$IP4 mask=255.255.240.0 gateway=$GW
+netsh -c interface ip add dnsservers name="Ethernet Instance 0" address=8.8.8.8 index=1 validate=no
+netsh -c interface ip add dnsservers name="Ethernet Instance 0" address=8.8.4.4 index=2 validate=no
 
-# Verifikasi swap
-echo "Verifikasi swap yang aktif:"
-swapon --show
-
-# Download ISO Windows Server 2022
-ISO_URL="https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
-ISO_PATH="/var/lib/libvirt/images/windows.iso"
-
-echo "Mengunduh ISO Windows Server 2022..."
-wget -O "$ISO_PATH" "$ISO_URL"
-
-# Membuat disk virtual untuk Windows
-echo "Membuat disk virtual untuk mesin Windows..."
-qemu-img create -f qcow2 /var/lib/libvirt/images/windows.img 50G
-
-# Menjalankan mesin virtual menggunakan KVM
-echo "Memulai mesin virtual untuk menginstal Windows Server..."
-virt-install \
-  --name windows-server \
-  --ram 4096 \
-  --vcpu 2 \
-  --disk path=/var/lib/libvirt/images/windows.img,format=qcow2 \
-  --cdrom "$ISO_PATH" \
-  --network bridge=virbr0,model=virtio \
-  --graphics none \
-  --boot cdrom \
-  --noautoconsole
-
-echo "Proses instalasi Windows dimulai..."
-
-# Membuat file unattend.xml untuk otomatisasi Windows
-echo "Membuat file unattend.xml untuk setup otomatis..."
-cat << EOF > /var/lib/libvirt/images/unattend.xml
-<?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
-    <settings pass="windowsPE">
-        <component name="Microsoft-Windows-Setup">
-            <ImageInstall>
-                <OSImage>
-                    <InstallTo>
-                        <DiskID>0</DiskID>
-                        <PartitionID>1</PartitionID>
-                    </InstallTo>
-                </OSImage>
-            </ImageInstall>
-        </component>
-    </settings>
-    <settings pass="specialize">
-        <component name="Microsoft-Windows-Shell-Setup">
-            <ComputerName>Windows2022</ComputerName>
-            <ProductKey></ProductKey>
-            <UserAccounts>
-                <LocalAccounts>
-                    <LocalAccount wcm:action="add">
-                        <Name>$RDP_USER</Name>
-                        <Group>Administrators</Group>
-                        <Password>
-                            <Value>$RDP_PASS</Value>
-                            <PlainText>true</PlainText>
-                        </Password>
-                    </LocalAccount>
-                </LocalAccounts>
-            </UserAccounts>
-            <TimeZone>UTC</TimeZone>
-        </component>
-    </settings>
-    <settings pass="oobeSystem">
-        <component name="Microsoft-Windows-Shell-Setup">
-            <OOBE>
-                <HideEULAPage>true</HideEULAPage>
-                <NetworkLocation>Home</NetworkLocation>
-            </OOBE>
-        </component>
-    </settings>
-</unattend>
+cd /d "%ProgramData%/Microsoft/Windows/Start Menu/Programs/Startup"
+del /f /q net.bat
+exit
 EOF
 
-echo "File unattend.xml untuk otomatisasi setup sudah siap."
 
-# Memindahkan file unattend.xml ke mesin virtual setelah instalasi dimulai.
-echo "Proses instalasi dimulai, dan unattend.xml akan disalin untuk otomatisasi."
+cat >/tmp/dpart.bat<<EOF
+@ECHO OFF
+echo HideSSH 
+echo JENDELA INI JANGAN DITUTUP
+echo SCRIPT INI AKAN MERUBAH PORT RDP MENJADI 5000, UNTUK MENYAMBUNG KE RDP GUNAKAN ALAMAT $IP4:5000
+echo KETIK YES LALU ENTER!
 
-echo "Setelah instalasi selesai, Anda dapat mengakses Windows Server menggunakan aplikasi Remote Desktop (RDP)."
-echo "Login dengan username: $RDP_USER dan password yang Anda tentukan."
+cd.>%windir%\GetAdmin
+if exist %windir%\GetAdmin (del /f /q "%windir%\GetAdmin") else (
+echo CreateObject^("Shell.Application"^).ShellExecute "%~s0", "%*", "", "runas", 1 >> "%temp%\Admin.vbs"
+"%temp%\Admin.vbs"
+del /f /q "%temp%\Admin.vbs"
+exit /b 2)
+
+set PORT=5000
+set RULE_NAME="Open Port %PORT%"
+
+netsh advfirewall firewall show rule name=%RULE_NAME% >nul
+if not ERRORLEVEL 1 (
+    rem Rule %RULE_NAME% already exists.
+    echo Hey, you already got a out rule by that name, you cannot put another one in!
+) else (
+    echo Rule %RULE_NAME% does not exist. Creating...
+    netsh advfirewall firewall add rule name=%RULE_NAME% dir=in action=allow protocol=TCP localport=%PORT%
+)
+
+reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v PortNumber /t REG_DWORD /d 5000
+
+ECHO SELECT VOLUME=%%SystemDrive%% > "%SystemDrive%\diskpart.extend"
+ECHO EXTEND >> "%SystemDrive%\diskpart.extend"
+START /WAIT DISKPART /S "%SystemDrive%\diskpart.extend"
+
+del /f /q "%SystemDrive%\diskpart.extend"
+cd /d "%ProgramData%/Microsoft/Windows/Start Menu/Programs/Startup"
+del /f /q dpart.bat
+timeout 50 >nul
+del /f /q ChromeSetup.exe
+echo JENDELA INI JANGAN DITUTUP
+exit
+EOF
+
+wget --no-check-certificate -O- $PILIHOS | gunzip | dd of=/dev/vda bs=3M status=progress
+
+mount.ntfs-3g /dev/vda2 /mnt
+cd "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/"
+cd Start* || cd start*; \
+wget https://nixpoin.com/ChromeSetup.exe
+cp -f /tmp/net.bat net.bat
+cp -f /tmp/dpart.bat dpart.bat
+
+echo "reboot Rdp dulu mazzeh baru bisa pake"
