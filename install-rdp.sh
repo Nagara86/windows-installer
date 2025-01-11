@@ -4,18 +4,20 @@
 apt update && apt upgrade -y
 
 # Install dependensi yang diperlukan
-apt install -y xfce4 xfce4-goodies tightvncserver xrdp wget curl
+apt install -y xfce4 xfce4-goodies tightvncserver xrdp wget curl unzip
 
-# Install file Windows jika diperlukan (optional, hanya jika ingin mengunduh Windows file dari link)
-wget "https://download1322.mediafire.com/q45q3lnfq46gmouZIGTp712CYsj2ZuIMho3b7Z-7A2TIBmrDCLiePiRXdKLeYvaXkwaIRHaN3UaEiDMbE3npFuMTAxRoP6Iu0tCKma3xJmWL_v1wcLngELHu78oqJ-OJGwSl87JkZzjUKxOLnxYR6mBUMo6-0jfbb2xg8zKnlj8SJA/s92phcj6bgp0yhg/Windows2022.gz"
-# Proses unzip jika ada
-gzip -d Windows2022.gz
+# Download ISO file Windows Server 2022
+echo "Downloading Windows Server 2022 ISO..."
+wget -O /home/SERVER_EVAL_x64FRE_en-us.iso "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso"
+
+# Menunjukkan hasil download untuk memastikan ISO ada
+ls -lh /home/SERVER_EVAL_x64FRE_en-us.iso
 
 # Install RDP konfigurasi
 # Hapus instalasi default xrdp
-apt-get remove --purge xrdp
+apt-get remove --purge xrdp -y
 
-# Unduh dan install xrdp terbaru dari repositori
+# Install xrdp terbaru
 apt install -y xrdp
 
 # Install beberapa dependensi RDP
@@ -43,3 +45,4 @@ ufw allow 3389/tcp
 
 # Output
 echo "RDP siap dengan username: admin dan password: admin123"
+echo "Windows Server ISO telah berhasil diunduh dan disimpan di: /home/SERVER_EVAL_x64FRE_en-us.iso"
