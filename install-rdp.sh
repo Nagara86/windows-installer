@@ -30,9 +30,11 @@ echo "startxfce4" >~/.xsession
 systemctl enable xrdp
 systemctl start xrdp
 
-# Buat user admin dan set password default
-useradd -m admin
-echo "admin:admin123" | chpasswd
+# Membuat user bella dan mengatur password
+# Memastikan grup admin sudah ada
+groupadd -f admin
+useradd -m -g admin bella
+echo "bella:bella123" | chpasswd
 
 # Setel ulang konfigurasi xrdp untuk port 3389 (default RDP)
 sed -i 's/port=3389/port=ask-1/' /etc/xrdp/xrdp.ini
@@ -44,5 +46,5 @@ systemctl restart xrdp
 ufw allow 3389/tcp
 
 # Output
-echo "RDP siap dengan username: admin dan password: admin123"
+echo "RDP siap dengan username: bella dan password: bella123"
 echo "Windows Server ISO telah berhasil diunduh dan disimpan di: /home/SERVER_EVAL_x64FRE_en-us.iso"
