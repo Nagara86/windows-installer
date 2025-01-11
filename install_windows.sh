@@ -1,13 +1,98 @@
 #!/bin/bash
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Function to check if running as root
+check_root() {
+    if [ "$EUID" -ne 0 ]; then 
+        echo -e "${RED}Please run as root (use sudo)${NC}"
+        exit 1
+    fi
+}
+
+# Function to check Ubuntu version
+check_ubuntu_version() {
+    if ! command -v lsb_release >/dev/null 2>&1; then
+        apt-get update && apt-get install -y lsb-release
+    fi
+    
+    VERSION=$(lsb_release -rs)
+    if [[ "$VERSION" != "18.04" && "$VERSION" != "20.04" ]]; then
+        echo -e "${RED}This script is only compatible with Ubuntu 18.04 or 20.04${NC}"
+        echo -e "${YELLOW}Current version: Ubuntu $VERSION${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Ubuntu version $VERSION detected - Compatible${NC}"
+}
+
+# Function to check system requirements
+check_system_requirements() {
+    # Check RAM
+    total_ram=$(free -m | awk '/^Mem:/{print $2}')
+    if [ $total_ram -lt 4000 ]; then
+        echo -e "${RED}Insufficient RAM. Minimum 4GB required. Current: ${total_ram}MB${NC}"
+        exit 1
+    fi
+    
+    # Check CPU cores
+    cpu_cores=$(nproc)
+    if [ $cpu_cores -lt 2 ]; then
+        echo -e "${RED}Insufficient CPU cores. Minimum 2 cores required. Current: $cpu_cores${NC}"
+        exit 1
+    fi
+    
+    # Check available disk space
+    free_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+    if [ $free_space -lt 40 ]; then
+        echo -e "${RED}Insufficient disk space. Minimum 40GB required. Current: ${free_space}GB${NC}"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}System requirements check passed${NC}"
+}
+
+# Function to install required packages
+install_required_packages() {
+    echo "Installing required packages..."
+    apt-get update
+    apt-get install -y wget gzip curl mount ntfs-3g
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install required packages${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Required packages installed successfully${NC}"
+}
+
+# Main installation script
 echo "SCRIPT AUTO INSTALL WINDOWS SERVER 2016 DATACENTER"
-echo
+echo "------------------------------------------------"
+
+# Run preliminary checks
+check_root
+check_ubuntu_version
+check_system_requirements
+install_required_packages
 
 # Prompt for Administrator password
-echo "[*] Password yang saya buat sudah masuk wordlist bruteforce, silahkan masukkan password yang lebih aman!"
+echo -e "\n${YELLOW}[*] Password yang saya buat sudah masuk wordlist bruteforce, silahkan masukkan password yang lebih aman!${NC}"
 read -p "[?] Masukkan password untuk akun Administrator RDP anda(minimal 12 karakter) : " PASSADMIN
+
+# Validate password length
+if [ ${#PASSADMIN} -lt 12 ]; then
+    echo -e "${RED}Password terlalu pendek. Minimal 12 karakter.${NC}"
+    exit 1
+fi
 
 # Get IP and Gateway information
 IP4=$(curl -4 -s icanhazip.com)
+if [ -z "$IP4" ]; then
+    echo -e "${RED}Tidak dapat mendapatkan IP address. Periksa koneksi internet anda.${NC}"
+    exit 1
+fi
 GW=$(ip route | awk '/default/ { print $3 }')
 
 # Create network configuration batch script
@@ -67,19 +152,34 @@ EOF
 
 # Download and mount Windows ISO
 ISO_URL="https://software-static.download.prss.microsoft.com/pr/download/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO"
-echo "Downloading Windows Server 2016 Datacenter ISO..."
-wget --no-check-certificate -O windows_server_2016.iso "$ISO_URL"
+echo -e "${YELLOW}Downloading Windows Server 2016 Datacenter ISO...${NC}"
+wget --no-check-certificate -O windows_server_2016.iso "$ISO_URL" || {
+    echo -e "${RED}Failed to download Windows ISO${NC}"
+    exit 1
+}
 
 # Create a temporary mount point
 mkdir -p /mnt/windows_iso
-mount -o loop windows_server_2016.iso /mnt/windows_iso
+mount -o loop windows_server_2016.iso /mnt/windows_iso || {
+    echo -e "${RED}Failed to mount ISO${NC}"
+    rm windows_server_2016.iso
+    exit 1
+}
 
 # Copy Windows installation files to target drive
-echo "Copying Windows installation files..."
-dd if=/mnt/windows_iso/sources/install.wim of=/dev/vda bs=3M status=progress
+echo -e "${YELLOW}Copying Windows installation files...${NC}"
+dd if=/mnt/windows_iso/sources/install.wim of=/dev/vda bs=3M status=progress || {
+    echo -e "${RED}Failed to copy Windows files${NC}"
+    umount /mnt/windows_iso
+    rm windows_server_2016.iso
+    exit 1
+}
 
 # Mount the Windows partition
-mount.ntfs-3g /dev/vda2 /mnt
+mount.ntfs-3g /dev/vda2 /mnt || {
+    echo -e "${RED}Failed to mount Windows partition${NC}"
+    exit 1
+}
 
 # Copy startup scripts
 cd "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/"
@@ -93,5 +193,5 @@ umount /mnt/windows_iso
 rm -f windows_server_2016.iso
 rmdir /mnt/windows_iso
 
-echo "Installation complete! Please reboot your system to start Windows Server 2016."
-echo "RDP will be available at $IP4:5000 after the system initialization."
+echo -e "${GREEN}Installation complete! Please reboot your system to start Windows Server 2016.${NC}"
+echo -e "${YELLOW}RDP will be available at $IP4:5000 after the system initialization.${NC}"
