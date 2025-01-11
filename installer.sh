@@ -1,14 +1,14 @@
 #!/bin/bash
-echo "SCRIPT AUTO INSTALL WINDOWS by Nagara"
+echo "SCRIPT AUTO INSTALL WINDOWS by HIDESSH"
 echo
 echo "Pilih OS yang ingin anda install"
 echo "[1] Windows 2019(Default)"
 echo "[2] Windows 2016"
 echo "[3] Windows 2012"
 echo "[4) Windows 10"
-echo "[5] Chat Nagara Untuk Add OS lain"
+echo "[5] Chat Ryan Untuk Add OS lain"
 
-read -p "Pilih [1]: " PILIH OS
+read -p "Pilih [1]: " PILIHOS
 
 case "$PILIHOS" in
 	1|"") PILIHOS="https://download1322.mediafire.com/q45q3lnfq46gmouZIGTp712CYsj2ZuIMho3b7Z-7A2TIBmrDCLiePiRXdKLeYvaXkwaIRHaN3UaEiDMbE3npFuMTAxRoP6Iu0tCKma3xJmWL_v1wcLngELHu78oqJ-OJGwSl87JkZzjUKxOLnxYR6mBUMo6-0jfbb2xg8zKnlj8SJA/s92phcj6bgp0yhg/Windows2022.gz";;
@@ -25,7 +25,6 @@ read -p "[?] Masukkan password untuk akun Administrator Rdp anda(minimal 12 kara
 IP4=$(curl -4 -s icanhazip.com)
 GW=$(ip route | awk '/default/ { print $3 }')
 
-
 cat >/tmp/net.bat<<EOF
 @ECHO OFF
 cd.>%windir%\GetAdmin
@@ -36,7 +35,6 @@ del /f /q "%temp%\Admin.vbs"
 exit /b 2)
 net user Administrator $PASSADMIN
 
-
 for /f "tokens=3*" %%i in ('netsh interface show interface ^|findstr /I /R "Local.* Ethernet Ins*"') do (set InterfaceName=%%j)
 netsh -c interface ip set address name="Ethernet Instance 0" source=static address=$IP4 mask=255.255.240.0 gateway=$GW
 netsh -c interface ip add dnsservers name="Ethernet Instance 0" address=8.8.8.8 index=1 validate=no
@@ -46,7 +44,6 @@ cd /d "%ProgramData%/Microsoft/Windows/Start Menu/Programs/Startup"
 del /f /q net.bat
 exit
 EOF
-
 
 cat >/tmp/dpart.bat<<EOF
 @ECHO OFF
