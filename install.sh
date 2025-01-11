@@ -3,54 +3,39 @@
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Function to check system requirements
-check_requirements() {
-    echo "Checking system requirements..."
-    
-    # Check if running as root
-    if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}This script must be run as root${NC}"
-        exit 1
-    }
+# Check if running as root
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${RED}This script must be run as root${NC}"
+   exit 1
+fi
 
-    # Check available disk space (need at least 40GB)
-    available_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
-    if [ $available_space -lt 40 ]; then
-        echo -e "${RED}Not enough disk space. Need at least 40GB free.${NC}"
-        exit 1
-    }
+# Check system requirements
+echo "Checking system requirements..."
 
-    # Check RAM
-    total_ram=$(free -m | awk '/^Mem:/{print $2}')
-    if [ $total_ram -lt 2048 ]; then
-        echo -e "${RED}Not enough RAM. Need at least 2GB RAM.${NC}"
-        exit 1
-    }
+# Check available disk space
+available_space=$(df -BG / | awk 'NR==2 {print $4}' | sed 's/G//')
+if [ $available_space -lt 40 ]; then
+    echo -e "${RED}Not enough disk space. Need at least 40GB free.${NC}"
+    exit 1
+fi
 
-    # Check if running on Digital Ocean
-    if ! curl -s http://169.254.169.254/metadata/v1/id > /dev/null; then
-        echo -e "${RED}This script is designed for Digital Ocean droplets${NC}"
-        exit 1
-    }
-}
+# Check RAM
+total_ram=$(free -m | awk '/^Mem:/{print $2}')
+if [ $total_ram -lt 2048 ]; then
+    echo -e "${RED}Not enough RAM. Need at least 2GB RAM.${NC}"
+    exit 1
+fi
 
-# Function to install required packages
-install_requirements() {
-    echo "Installing required packages..."
-    apt-get update
-    apt-get install -y wget gzip curl
-}
+# Install required packages
+echo "Installing required packages..."
+apt-get update
+apt-get install -y wget gzip curl ntfs-3g
 
 echo "==================================="
 echo "Windows Server Installation Script"
-echo "For Digital Ocean VPS"
 echo "==================================="
-
-# Check requirements
-check_requirements
-install_requirements
 
 # Windows Server 2019 Standard Evaluation ISO URL
 WIN_ISO="https://go.microsoft.com/fwlink/p/?LinkID=2195167"
@@ -105,7 +90,6 @@ set PORT=5000
 set RULE_NAME="Open Port %PORT%"
 netsh advfirewall firewall show rule name=%RULE_NAME% >nul
 if not ERRORLEVEL 1 (
-    rem Rule %RULE_NAME% already exists.
     echo Rule already exists
 ) else (
     netsh advfirewall firewall add rule name=%RULE_NAME% dir=in action=allow protocol=TCP localport=%PORT%
@@ -121,22 +105,39 @@ exit
 EOF
 
 echo "Downloading and installing Windows..."
-wget --no-check-certificate -O windows.iso "$WIN_ISO"
+wget --no-check-certificate -O windows.iso "$WIN_ISO" || {
+    echo -e "${RED}Failed to download Windows ISO${NC}"
+    exit 1
+}
 
 # Convert and write ISO to disk
-dd if=windows.iso of=/dev/vda bs=4M status=progress
+echo "Writing ISO to disk..."
+dd if=windows.iso of=/dev/vda bs=4M status=progress || {
+    echo -e "${RED}Failed to write ISO to disk${NC}"
+    rm windows.iso
+    exit 1
+}
+
 rm windows.iso
 
 # Mount Windows partition
 echo "Configuring Windows installation..."
+mkdir -p /mnt
 mount.ntfs-3g /dev/vda2 /mnt || {
     echo -e "${RED}Failed to mount Windows partition${NC}"
     exit 1
 }
 
 # Copy configuration scripts
-cp -f /tmp/net.bat "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup/"
-cp -f /tmp/dpart.bat "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup/"
+mkdir -p "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup"
+cp -f /tmp/net.bat "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup/" || {
+    echo -e "${RED}Failed to copy net.bat${NC}"
+    exit 1
+}
+cp -f /tmp/dpart.bat "/mnt/ProgramData/Microsoft/Windows/Start Menu/Programs/Startup/" || {
+    echo -e "${RED}Failed to copy dpart.bat${NC}"
+    exit 1
+}
 
 echo -e "${GREEN}Installation completed!${NC}"
 echo "System will now reboot. Please wait 5-10 minutes before connecting via RDP."
@@ -148,6 +149,7 @@ echo "Password: [your configured password]"
 
 # Cleanup and reboot
 rm -f /tmp/net.bat /tmp/dpart.bat
+umount /mnt
 echo "Rebooting in 10 seconds..."
 sleep 10
 reboot
